@@ -55,13 +55,27 @@ export default function BoneEditorModal({ onClose, onSave }) {
       // gesture as a page scroll mid-drag.
       e.currentTarget.setPointerCapture?.(e.pointerId);
       setDraggingId(jointId);
+      // Dragging the root (Hips) translates the whole rig as one rigid unit
+      // so the user can center/scale-align the template over their art
+      // first, without stretching every bone into a spider-web. Dragging
+      // any other node still moves just that node, stretching its bone —
+      // that's how individual limbs get snapped onto the anatomy.
+      const isRoot = joints.find((j) => j.id === jointId)?.parentId === null;
       function onMove(ev) {
         ev.preventDefault();
         const rect = imgRef.current.getBoundingClientRect();
         const scale = image.width / rect.width;
         const x = clamp((ev.clientX - rect.left) * scale, 0, image.width);
         const y = clamp((ev.clientY - rect.top) * scale, 0, image.height);
-        setJoints((js) => js.map((j) => (j.id === jointId ? { ...j, x, y } : j)));
+        setJoints((js) => {
+          if (isRoot) {
+            const current = js.find((j) => j.id === jointId);
+            const dx = x - current.x;
+            const dy = y - current.y;
+            return js.map((j) => ({ ...j, x: j.x + dx, y: j.y + dy }));
+          }
+          return js.map((j) => (j.id === jointId ? { ...j, x, y } : j));
+        });
       }
       function onUp() {
         setDraggingId(null);
@@ -182,9 +196,10 @@ export default function BoneEditorModal({ onClose, onSave }) {
                   {joints.map((j) => {
                     const cx = j.x * scale;
                     const cy = j.y * scale;
-                    const fill = j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a';
+                    const isRootNode = j.parentId === null;
+                    const fill = isRootNode ? '#ffd76b' : j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a';
                     const isDragging = draggingId === j.id;
-                    const r = j.shape === 'dot' ? 5 : j.shape === 'triangle' ? 10 : 8;
+                    const r = isRootNode ? 11 : j.shape === 'dot' ? 5 : j.shape === 'triangle' ? 10 : 8;
                     return (
                       <g
                         key={j.id}
@@ -196,6 +211,7 @@ export default function BoneEditorModal({ onClose, onSave }) {
                             markers (esp. facial dots) are too small to
                             reliably grab with a fingertip. */}
                         <circle cx={cx} cy={cy} r={j.facial ? 12 : 16} fill="transparent" />
+                        {isRootNode && <circle cx={cx} cy={cy} r={r + 5} fill="none" stroke="#ffd76b" strokeWidth={1.5} strokeDasharray="3,3" />}
                         {j.shape === 'triangle' ? (
                           <polygon
                             points={`${cx},${cy - r * 1.3} ${cx - r * 1.1},${cy + r * 0.8} ${cx + r * 1.1},${cy + r * 0.8}`}
@@ -206,13 +222,13 @@ export default function BoneEditorModal({ onClose, onSave }) {
                         ) : (
                           <circle cx={cx} cy={cy} r={r} fill={fill} stroke="#000" strokeWidth={1.5} />
                         )}
-                        <title>{j.label}</title>
+                        <title>{isRootNode ? `${j.label} (drag to move whole rig)` : j.label}</title>
                       </g>
                     );
                   })}
                 </svg>
               </div>
-              <p className="hint">Drag any node to align it with the image's anatomy. Head = triangle, eyes/mouth = small dots, joints = circles.</p>
+              <p className="hint">Drag the gold ringed Hips node first to move the whole rig into place — it translates everything together without stretching. Then drag any other node to snap that limb onto the anatomy. Head = triangle, eyes/mouth = small dots, joints = circles.</p>
               <div className="bone-editor-actions-row">
                 <button className="btn-ghost" onClick={resetTemplate}>Reset Template</button>
                 <input type="text" value={rigName} onChange={(e) => setRigName(e.target.value)} placeholder="Rig name" />
@@ -224,8 +240,11 @@ export default function BoneEditorModal({ onClose, onSave }) {
               <div className="joint-list-scroll">
                 {joints.map((j) => (
                   <div key={j.id} className="joint-row">
-                    <span className={`joint-dot shape-${j.shape}`} style={{ background: j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a' }} />
-                    <span className="joint-name">{j.label}</span>
+                    <span
+                      className={`joint-dot shape-${j.shape}`}
+                      style={{ background: j.parentId === null ? '#ffd76b' : j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a' }}
+                    />
+                    <span className="joint-name">{j.label}{j.parentId === null ? ' (root)' : ''}</span>
                   </div>
                 ))}
               </div>
