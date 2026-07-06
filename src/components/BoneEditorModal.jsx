@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { uid } from '../utils/id.js';
-import { buildGrid, assignTriangleBones } from '../engine/meshWarp.js';
+import { buildGrid, assignTriangleBones, computeTriangleVisibility, hasTransparentBackground } from '../engine/meshWarp.js';
 import { instantiateMetaRig } from '../data/metaRig.js';
+import { detectMetaRigPose } from '../engine/autoRig.js';
 
 function loadImage(dataUrl) {
   return new Promise((resolve, reject) => {
@@ -22,6 +23,9 @@ export default function BoneEditorModal({ onClose, onSave }) {
   const [displayWidth, setDisplayWidth] = useState(0);
   const [rigName, setRigName] = useState('My Monster');
   const [draggingId, setDraggingId] = useState(null);
+  const [hasTransparency, setHasTransparency] = useState(null); // null=unknown, true/false
+  const [autoRigState, setAutoRigState] = useState('idle'); // 'idle' | 'analyzing' | 'error'
+  const [autoRigError, setAutoRigError] = useState('');
   const imgRef = useRef(null);
 
   async function handleFile(e) {
@@ -36,6 +40,7 @@ export default function BoneEditorModal({ onClose, onSave }) {
       setDisplayWidth(dispW);
       setImage({ el, dataUrl, width: el.naturalWidth, height: el.naturalHeight });
       setJoints(instantiateMetaRig(el.naturalWidth, el.naturalHeight));
+      setHasTransparency(hasTransparentBackground(el, el.naturalWidth, el.naturalHeight));
     };
     reader.readAsDataURL(file);
   }
@@ -43,6 +48,25 @@ export default function BoneEditorModal({ onClose, onSave }) {
   function resetTemplate() {
     if (!image) return;
     setJoints(instantiateMetaRig(image.width, image.height));
+  }
+
+  async function runAutoRig() {
+    if (!image || autoRigState === 'analyzing') return;
+    setAutoRigState('analyzing');
+    setAutoRigError('');
+    try {
+      const detected = await detectMetaRigPose(image.el);
+      if (!detected) {
+        setAutoRigState('error');
+        setAutoRigError("Couldn't find a clear humanoid pose in this image — try dragging the nodes manually instead.");
+        return;
+      }
+      setJoints((js) => js.map((j) => (detected[j.id] ? { ...j, x: detected[j.id].x, y: detected[j.id].y } : j)));
+      setAutoRigState('idle');
+    } catch {
+      setAutoRigState('error');
+      setAutoRigError('Auto-detection failed to load (needs an internet connection the first time). Try again, or align the rig manually.');
+    }
   }
 
   function startDragNode(jointId) {
@@ -122,10 +146,11 @@ export default function BoneEditorModal({ onClose, onSave }) {
     }
     joints.forEach(resolve);
 
-    const cols = 12;
-    const rows = Math.max(6, Math.min(20, Math.round((12 * image.height) / image.width)));
+    const cols = 16;
+    const rows = Math.max(8, Math.min(28, Math.round((16 * image.height) / image.width)));
     const mesh = buildGrid(image.width, image.height, cols, rows);
     const triangleBones = assignTriangleBones(mesh, joints.map((j) => ({ id: j.id, x: j.x, y: j.y, parentId: j.parentId })));
+    const triangleVisible = computeTriangleVisibility(image.el, mesh);
 
     const rig = {
       id: uid('rig'),
@@ -140,6 +165,7 @@ export default function BoneEditorModal({ onClose, onSave }) {
       bindWorldAngle,
       mesh,
       triangleBones,
+      triangleVisible,
     };
     onSave(rig);
   }
@@ -164,6 +190,13 @@ export default function BoneEditorModal({ onClose, onSave }) {
         {image && (
           <div className="bone-editor-body">
             <div className="bone-editor-canvas-wrap">
+              {hasTransparency === false && (
+                <p className="hint warn">
+                  This image doesn't look like it has a transparent background. Rigging will still work, but the
+                  background around your character will move in chunks with whichever limb it's closest to. For a
+                  clean result, use a cutout PNG with transparency.
+                </p>
+              )}
               <div className="bone-editor-canvas" style={{ width: displayWidth }}>
                 <img ref={imgRef} src={image.dataUrl} alt="rig source" style={{ width: displayWidth }} draggable={false} />
                 <svg className="bone-overlay bone-overlay-interactive" style={{ width: displayWidth, height: displayHeight }}>
@@ -230,9 +263,13 @@ export default function BoneEditorModal({ onClose, onSave }) {
               </div>
               <p className="hint">Drag the gold ringed Hips node first to move the whole rig into place — it translates everything together without stretching. Then drag any other node to snap that limb onto the anatomy. Head = triangle, eyes/mouth = small dots, joints = circles.</p>
               <div className="bone-editor-actions-row">
+                <button className="btn-autorig" onClick={runAutoRig} disabled={autoRigState === 'analyzing'}>
+                  {autoRigState === 'analyzing' ? '✨ Analyzing…' : '✨ Auto-Detect Skeleton'}
+                </button>
                 <button className="btn-ghost" onClick={resetTemplate}>Reset Template</button>
                 <input type="text" value={rigName} onChange={(e) => setRigName(e.target.value)} placeholder="Rig name" />
               </div>
+              {autoRigState === 'error' && <p className="hint warn">{autoRigError}</p>}
             </div>
 
             <div className="bone-editor-joint-list">

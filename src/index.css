@@ -11,6 +11,7 @@
   --neon: #39ff6a;
   --neon-dim: rgba(57, 255, 106, 0.25);
   --warn: #ffd76b;
+  --vision: #9a5cff;
 
   color-scheme: dark;
   font: 15px/1.4 'Segoe UI', system-ui, Roboto, sans-serif;
@@ -99,6 +100,24 @@ select, input[type='text'], input[type='number'] {
 .btn-ghost.small { padding: 2px 6px; font-size: 11px; }
 .btn-icon { font-size: 16px; padding: 4px 10px; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-autorig {
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--vision);
+  background: linear-gradient(180deg, rgba(154, 92, 255, 0.25), rgba(154, 92, 255, 0.08));
+  color: #e5d4ff;
+  box-shadow: 0 0 10px rgba(154, 92, 255, 0.45);
+  animation: autorig-pulse 2.2s ease-in-out infinite;
+}
+.btn-autorig:hover:not(:disabled) { box-shadow: 0 0 18px rgba(154, 92, 255, 0.75); }
+.btn-autorig:disabled { animation: none; box-shadow: none; opacity: 0.6; }
+@keyframes autorig-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(154, 92, 255, 0.45); }
+  50% { box-shadow: 0 0 18px rgba(154, 92, 255, 0.85); }
+}
 
 .field { display: flex; flex-direction: column; font-size: 11px; color: var(--text-dim); gap: 2px; }
 .field.inline { flex-direction: row; align-items: center; gap: 6px; }

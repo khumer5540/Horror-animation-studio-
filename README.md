@@ -20,12 +20,25 @@ character.
   19-node humanoid Meta-Rig template overlays it automatically; drag the
   gold-ringed Hips node to move the whole skeleton into place, then drag any
   other node to snap that limb onto the anatomy. Right-click a joint on
-  stage to Sever/Reattach it for decapitation-style effects. Rendering is a
-  rigid "cutout puppet": each triangle of a grid over the image is assigned
-  to a single bone and rigidly rotated/translated with it (no blending
-  across bones), so posing can never stretch or tear the source image — a
-  seam can appear at a joint once it bends a lot, but the pixels themselves
-  are never distorted. No pre-cut layers required.
+  stage to Sever/Reattach it for decapitation-style effects.
+  - **✨ Auto-Detect Skeleton** — runs MediaPipe's PoseLandmarker (BlazePose,
+    on-device, no image ever leaves the browser) to find a person in the
+    uploaded image and snap all 19 nodes onto the detected landmarks in one
+    click. Falls back cleanly to manual dragging if no pose is found or the
+    model can't load. Needs an internet connection the first time (to fetch
+    the ~6MB model from Google's CDN); the WASM runtime itself is
+    self-hosted from `public/mediapipe-wasm` (see "Development" below).
+  - Rendering is a rigid "cutout puppet": each quad of a grid over the image
+    is assigned to a single bone (whichever it sits closest to in bind
+    pose) and rigidly rotated/translated with it — never blended across
+    bones — so posing can never stretch or tear the source image. For
+    images with a transparent background, empty regions are also excluded
+    from the mesh so background pixels don't fly around with the nearest
+    limb; a plain photo/JPEG without transparency will show a warning and
+    move its background in chunks instead. A seam can appear at a joint
+    once it bends a lot, which is inherent to (and expected of) this style,
+    not a bug — the joint's own marker sits right on top of it, same as a
+    real paper-puppet pin.
 - **Image-to-Prop** — upload a static image as a scalable, rotatable prop
   without rigging it.
 - **Timeline** — per-character/prop/camera keyframe tracks, ease-in-out
@@ -46,3 +59,8 @@ browser.
 npm install
 npm run dev
 ```
+
+`npm install` runs a `postinstall` step that copies MediaPipe's WASM runtime
+(~30MB, used by Auto-Detect Skeleton) out of `node_modules` into
+`public/mediapipe-wasm/` — that folder is gitignored and regenerated on every
+install rather than committed, same as `node_modules`/`dist`.

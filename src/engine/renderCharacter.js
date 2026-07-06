@@ -200,7 +200,7 @@ export function drawCustomCharacter(ctx, character, world, customRigs) {
   // Joint world positions (from FK, rooted at character.x/y) are already in
   // canvas world space, so each rigidly-transformed triangle lands directly
   // in world space too — no extra transform needed here.
-  drawRigidCutoutMesh(ctx, rig.imageEl, rig.mesh, rig.triangleBones, rig.bindPositions, world, rig.bindWorldAngle);
+  drawRigidCutoutMesh(ctx, rig.imageEl, rig.mesh, rig.triangleBones, rig.bindPositions, world, rig.bindWorldAngle, rig.triangleVisible);
 }
 
 // Glowing skeleton overlay for a selected custom rig: bright connecting
