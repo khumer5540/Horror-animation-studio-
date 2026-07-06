@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { uid } from '../utils/id.js';
 import { buildGrid, computeWeights } from '../engine/meshWarp.js';
+import { instantiateMetaRig } from '../data/metaRig.js';
 
 function loadImage(dataUrl) {
   return new Promise((resolve, reject) => {
@@ -11,11 +12,16 @@ function loadImage(dataUrl) {
   });
 }
 
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 export default function BoneEditorModal({ onClose, onSave }) {
   const [image, setImage] = useState(null); // { el, dataUrl, width, height }
-  const [joints, setJoints] = useState([]); // { id, name, x, y, parentId }
+  const [joints, setJoints] = useState([]); // { id, label, x, y, parentId, shape, facial }
   const [displayWidth, setDisplayWidth] = useState(0);
   const [rigName, setRigName] = useState('My Monster');
+  const [draggingId, setDraggingId] = useState(null);
   const imgRef = useRef(null);
 
   async function handleFile(e) {
@@ -29,41 +35,42 @@ export default function BoneEditorModal({ onClose, onSave }) {
       const dispW = Math.min(maxW, el.naturalWidth);
       setDisplayWidth(dispW);
       setImage({ el, dataUrl, width: el.naturalWidth, height: el.naturalHeight });
-      setJoints([]);
+      setJoints(instantiateMetaRig(el.naturalWidth, el.naturalHeight));
     };
     reader.readAsDataURL(file);
   }
 
-  function handleImageClick(e) {
+  function resetTemplate() {
     if (!image) return;
-    const rect = imgRef.current.getBoundingClientRect();
-    const scale = image.width / rect.width;
-    const x = (e.clientX - rect.left) * scale;
-    const y = (e.clientY - rect.top) * scale;
-    const parentId = joints.length > 0 ? joints[joints.length - 1].id : null;
-    const joint = { id: uid('joint'), name: joints.length === 0 ? 'Root' : `Joint ${joints.length + 1}`, x, y, parentId };
-    setJoints((j) => [...j, joint]);
+    setJoints(instantiateMetaRig(image.width, image.height));
   }
 
-  function updateParent(jointId, parentId) {
-    setJoints((js) => js.map((j) => (j.id === jointId ? { ...j, parentId: parentId || null } : j)));
-  }
-
-  function removeJoint(jointId) {
-    setJoints((js) => {
-      const target = js.find((j) => j.id === jointId);
-      return js.filter((j) => j.id !== jointId).map((j) => (j.parentId === jointId ? { ...j, parentId: target?.parentId ?? null } : j));
-    });
-  }
-
-  function undoLast() {
-    setJoints((js) => js.slice(0, -1));
+  function startDragNode(jointId) {
+    return (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setDraggingId(jointId);
+      function onMove(ev) {
+        const rect = imgRef.current.getBoundingClientRect();
+        const scale = image.width / rect.width;
+        const x = clamp((ev.clientX - rect.left) * scale, 0, image.width);
+        const y = clamp((ev.clientY - rect.top) * scale, 0, image.height);
+        setJoints((js) => js.map((j) => (j.id === jointId ? { ...j, x, y } : j)));
+      }
+      function onUp() {
+        setDraggingId(null);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    };
   }
 
   const scale = image ? displayWidth / image.width : 1;
 
   function canSave() {
-    return image && joints.length >= 2 && joints.some((j) => j.parentId === null);
+    return !!image && joints.length > 0;
   }
 
   function handleSave() {
@@ -115,17 +122,19 @@ export default function BoneEditorModal({ onClose, onSave }) {
     onSave(rig);
   }
 
+  const displayHeight = image ? displayWidth * (image.height / image.width) : 0;
+
   return (
     <div className="modal-backdrop">
       <div className="modal bone-editor">
         <div className="modal-header">
-          <h2>Import &amp; Rig — Bone Editor</h2>
+          <h2>Import &amp; Rig — Meta-Rig Bone Editor</h2>
           <button className="btn-ghost" onClick={onClose}>✕</button>
         </div>
 
         {!image && (
           <div className="bone-editor-upload">
-            <p>Upload any image (a monster, a dog, anything) and click to place joint nodes.</p>
+            <p>Upload any image (a monster, a dog, anything) — a full humanoid skeleton drops onto it automatically. Just drag each node onto the matching anatomy.</p>
             <input type="file" accept="image/*" onChange={handleFile} />
           </div>
         )}
@@ -134,51 +143,84 @@ export default function BoneEditorModal({ onClose, onSave }) {
           <div className="bone-editor-body">
             <div className="bone-editor-canvas-wrap">
               <div className="bone-editor-canvas" style={{ width: displayWidth }}>
-                <img ref={imgRef} src={image.dataUrl} alt="rig source" style={{ width: displayWidth }} onClick={handleImageClick} draggable={false} />
-                <svg className="bone-overlay" style={{ width: displayWidth, height: displayWidth * (image.height / image.width) }}>
+                <img ref={imgRef} src={image.dataUrl} alt="rig source" style={{ width: displayWidth }} draggable={false} />
+                <svg className="bone-overlay bone-overlay-interactive" style={{ width: displayWidth, height: displayHeight }}>
+                  <defs>
+                    <filter id="boneGlow" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
                   {joints.map((j) => {
                     const parent = joints.find((p) => p.id === j.parentId);
-                    return parent ? (
-                      <line key={`l-${j.id}`} x1={parent.x * scale} y1={parent.y * scale} x2={j.x * scale} y2={j.y * scale} stroke="#39ff6a" strokeWidth={2} />
-                    ) : null;
+                    if (!parent) return null;
+                    const isFaceCluster = j.facial || j.id === 'head';
+                    return (
+                      <line
+                        key={`l-${j.id}`}
+                        x1={parent.x * scale}
+                        y1={parent.y * scale}
+                        x2={j.x * scale}
+                        y2={j.y * scale}
+                        stroke={isFaceCluster ? '#ff2e4d' : '#39ff6a'}
+                        strokeWidth={isFaceCluster ? 1.5 : 2.5}
+                        filter="url(#boneGlow)"
+                      />
+                    );
                   })}
-                  {joints.map((j, i) => (
-                    <g key={j.id}>
-                      <circle cx={j.x * scale} cy={j.y * scale} r={7} fill={i === 0 ? '#ff2e4d' : '#39ff6a'} stroke="#000" strokeWidth={1.5} />
-                      <text x={j.x * scale + 10} y={j.y * scale + 4} fontSize="11" fill="#fff">{j.name}</text>
-                    </g>
-                  ))}
+                  {joints.map((j) => {
+                    const cx = j.x * scale;
+                    const cy = j.y * scale;
+                    const fill = j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a';
+                    const isDragging = draggingId === j.id;
+                    const r = j.shape === 'dot' ? 5 : j.shape === 'triangle' ? 10 : 8;
+                    return (
+                      <g
+                        key={j.id}
+                        className="bone-node"
+                        onPointerDown={startDragNode(j.id)}
+                        filter={isDragging ? 'url(#boneGlow)' : undefined}
+                      >
+                        {j.shape === 'triangle' ? (
+                          <polygon
+                            points={`${cx},${cy - r * 1.3} ${cx - r * 1.1},${cy + r * 0.8} ${cx + r * 1.1},${cy + r * 0.8}`}
+                            fill={fill}
+                            stroke="#000"
+                            strokeWidth={1.5}
+                          />
+                        ) : (
+                          <circle cx={cx} cy={cy} r={r} fill={fill} stroke="#000" strokeWidth={1.5} />
+                        )}
+                        <title>{j.label}</title>
+                      </g>
+                    );
+                  })}
                 </svg>
               </div>
-              <p className="hint">Click on the image to drop a joint pin. First pin = root anchor. New pins auto-parent to the previous pin — change that below if needed.</p>
+              <p className="hint">Drag any node to align it with the image's anatomy. Head = triangle, eyes/mouth = small dots, joints = circles.</p>
               <div className="bone-editor-actions-row">
-                <button className="btn-ghost" onClick={undoLast} disabled={joints.length === 0}>Undo Last Pin</button>
+                <button className="btn-ghost" onClick={resetTemplate}>Reset Template</button>
                 <input type="text" value={rigName} onChange={(e) => setRigName(e.target.value)} placeholder="Rig name" />
               </div>
             </div>
 
             <div className="bone-editor-joint-list">
-              <h3>Joints ({joints.length})</h3>
+              <h3>Meta-Rig Nodes ({joints.length})</h3>
               <div className="joint-list-scroll">
-                {joints.map((j, i) => (
+                {joints.map((j) => (
                   <div key={j.id} className="joint-row">
-                    <span className="joint-dot" style={{ background: i === 0 ? '#ff2e4d' : '#39ff6a' }} />
-                    <span className="joint-name">{j.name}</span>
-                    <select value={j.parentId || ''} onChange={(e) => updateParent(j.id, e.target.value)}>
-                      <option value="">root (no parent)</option>
-                      {joints.filter((p) => p.id !== j.id).map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <button className="btn-ghost small" onClick={() => removeJoint(j.id)}>✕</button>
+                    <span className={`joint-dot shape-${j.shape}`} style={{ background: j.shape === 'triangle' ? '#ff2e4d' : j.facial ? '#ff8fa3' : '#39ff6a' }} />
+                    <span className="joint-name">{j.label}</span>
                   </div>
                 ))}
-                {joints.length === 0 && <p className="hint">No joints yet — click the image.</p>}
               </div>
+              <p className="hint">Hierarchy is fixed by the template — just drag to align. Once saved, you can right-click any joint on the stage to Sever/Reattach it for decapitation-style effects.</p>
               <button className="btn-primary" disabled={!canSave()} onClick={handleSave}>
                 Save Rig &amp; Add to Stage
               </button>
-              {!canSave() && joints.length > 0 && <p className="hint warn">Need at least 2 joints with one root.</p>}
             </div>
           </div>
         )}

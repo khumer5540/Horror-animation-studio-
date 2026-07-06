@@ -22,6 +22,20 @@ export function lerpPose(a, b, t) {
         for (const boneId of Object.keys(a[key])) {
           out[key][boneId] = angleLerp(a[key][boneId] ?? 0, b[key]?.[boneId] ?? a[key][boneId] ?? 0, t);
         }
+      } else if (key === 'severed') {
+        // Sever/reattach is a discrete state, not a continuous quantity: for
+        // joints severed on both sides of the tween, lerp their free-floating
+        // position; for joints that only appear on one side, snap at the
+        // midpoint so the detach/reattach visibly happens mid-animation.
+        out[key] = {};
+        const ids = new Set([...Object.keys(a[key] || {}), ...Object.keys(b[key] || {})]);
+        for (const jointId of ids) {
+          const av = a[key]?.[jointId];
+          const bv = b[key]?.[jointId];
+          if (av && bv) out[key][jointId] = { x: lerp(av.x, bv.x, t), y: lerp(av.y, bv.y, t) };
+          else if (t < 0.5 && av) out[key][jointId] = av;
+          else if (t >= 0.5 && bv) out[key][jointId] = bv;
+        }
       } else {
         out[key] = lerpPose(a[key], b[key] ?? a[key], t);
       }

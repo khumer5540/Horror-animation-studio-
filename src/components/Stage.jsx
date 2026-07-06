@@ -1,5 +1,13 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { computeCharacterWorld, drawBuiltInCharacter, drawCustomCharacter } from '../engine/renderCharacter.js';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import {
+  computeCharacterWorld,
+  drawBuiltInCharacter,
+  drawCustomCharacter,
+  drawSkeletonOverlay,
+  getRootJointId,
+  computeSeverPayload,
+  computeReattachPayload,
+} from '../engine/renderCharacter.js';
 import { solveLocalAngleForTarget } from '../engine/skeleton.js';
 import { DRAGGABLE_JOINTS, HUMANOID_BONES } from '../data/rigTypes.js';
 import { PROP_TYPES } from '../data/props.js';
@@ -18,6 +26,7 @@ export default function Stage({ state, dispatch }) {
   const dragRef = useRef(null); // { mode, ... }
   const stateRef = useRef(state);
   stateRef.current = state;
+  const [contextMenu, setContextMenu] = useState(null); // { sx, sy, characterId, jointId, isSevered }
 
   const getWorldPoint = useCallback((clientX, clientY) => {
     const canvas = canvasRef.current;
@@ -89,18 +98,22 @@ export default function Stage({ state, dispatch }) {
       else drawBuiltInCharacter(ctx, c, world, selected);
 
       if (selected) {
-        const joints = c.kind === 'custom' ? (state.customRigs[c.customRigId]?.joints || []).map((j) => j.id) : DRAGGABLE_JOINTS;
-        joints.forEach((jid) => {
-          const p = world.get(jid);
-          if (!p) return;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 5 / state.camera.zoom, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(57,255,106,0.85)';
-          ctx.fill();
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 1 / state.camera.zoom;
-          ctx.stroke();
-        });
+        if (c.kind === 'custom') {
+          drawSkeletonOverlay(ctx, c, world, state.customRigs, state.camera.zoom);
+        } else {
+          DRAGGABLE_JOINTS.forEach((jid) => {
+            const p = world.get(jid);
+            if (!p) return;
+            const isSevered = !!(c.severed && c.severed[jid]);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5 / state.camera.zoom, 0, Math.PI * 2);
+            ctx.fillStyle = isSevered ? 'rgba(255,215,107,0.9)' : 'rgba(57,255,106,0.85)';
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1 / state.camera.zoom;
+            ctx.stroke();
+          });
+        }
       }
     });
 
@@ -187,8 +200,9 @@ export default function Stage({ state, dispatch }) {
         if (!p) continue;
         const d = Math.hypot(p.x - worldPoint.x, p.y - worldPoint.y);
         if (d < HIT_PX / s.camera.zoom) {
-          const rootId = c.kind === 'custom' ? s.customRigs[c.customRigId]?.rootId : 'hips';
-          return { characterId: c.id, jointId: jid, isRoot: jid === rootId, world };
+          const rootId = getRootJointId(c, s.customRigs);
+          const isSevered = !!(c.severed && c.severed[jid]);
+          return { characterId: c.id, jointId: jid, isRoot: jid === rootId, isSevered, world };
         }
       }
     }
@@ -220,11 +234,13 @@ export default function Stage({ state, dispatch }) {
   }
 
   function handlePointerDown(e) {
+    if (e.button !== 0) return; // right/middle click: handled by onContextMenu instead
     const wp = getWorldPoint(e.clientX, e.clientY);
     const jointHit = findJointHit(wp);
     if (jointHit) {
       dispatch({ type: 'SELECT', selection: { type: 'character', id: jointHit.characterId } });
-      dragRef.current = { mode: jointHit.isRoot ? 'move-character' : 'rotate-joint', ...jointHit, startWorld: wp };
+      const mode = jointHit.isRoot ? 'move-character' : jointHit.isSevered ? 'move-severed-joint' : 'rotate-joint';
+      dragRef.current = { mode, ...jointHit, startWorld: wp };
       return;
     }
     const propHit = findPropHit(wp);
@@ -267,6 +283,10 @@ export default function Stage({ state, dispatch }) {
       dispatch({ type: 'UPDATE_CHARACTER_POSE', id: drag.characterId, bones: { [drag.jointId]: localAngle } });
       return;
     }
+    if (drag.mode === 'move-severed-joint') {
+      dispatch({ type: 'UPDATE_CHARACTER_POSE', id: drag.characterId, severed: { [drag.jointId]: { x: wp.x, y: wp.y } } });
+      return;
+    }
     if (drag.mode === 'move-prop') {
       const prop = s.props.find((p) => p.id === drag.propId);
       if (prop?.attachedTo) return;
@@ -290,6 +310,51 @@ export default function Stage({ state, dispatch }) {
   function handlePointerUp() {
     dragRef.current = null;
   }
+
+  function handleContextMenu(e) {
+    e.preventDefault();
+    const wp = getWorldPoint(e.clientX, e.clientY);
+    const hit = findJointHit(wp);
+    if (!hit || hit.isRoot) {
+      setContextMenu(null);
+      return;
+    }
+    setContextMenu({ sx: wp.sx, sy: wp.sy, characterId: hit.characterId, jointId: hit.jointId, isSevered: hit.isSevered });
+  }
+
+  function handleSever() {
+    if (!contextMenu) return;
+    const s = stateRef.current;
+    const character = s.characters.find((c) => c.id === contextMenu.characterId);
+    if (!character) return setContextMenu(null);
+    const payload = computeSeverPayload(character, s.customRigs, contextMenu.jointId);
+    if (payload) {
+      dispatch({ type: 'SEVER_JOINT', id: character.id, jointId: contextMenu.jointId, x: payload.x, y: payload.y, angle: payload.angle });
+    }
+    setContextMenu(null);
+  }
+
+  function handleReattach() {
+    if (!contextMenu) return;
+    const s = stateRef.current;
+    const character = s.characters.find((c) => c.id === contextMenu.characterId);
+    if (!character) return setContextMenu(null);
+    const payload = computeReattachPayload(character, s.customRigs, contextMenu.jointId);
+    if (payload) {
+      dispatch({ type: 'REATTACH_JOINT', id: character.id, jointId: contextMenu.jointId, angle: payload.angle });
+    }
+    setContextMenu(null);
+  }
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    function onDown(e) {
+      if (e.target.closest?.('.stage-context-menu')) return;
+      setContextMenu(null);
+    }
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [contextMenu]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -334,8 +399,18 @@ export default function Stage({ state, dispatch }) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onContextMenu={handleContextMenu}
       />
       <div className="zoom-indicator">{Math.round(state.camera.zoom * 100)}%</div>
+      {contextMenu && (
+        <div className="stage-context-menu" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
+          {contextMenu.isSevered ? (
+            <button onClick={handleReattach}>🔗 Reattach Bone</button>
+          ) : (
+            <button onClick={handleSever}>✂️ Sever Bone</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -13,7 +13,35 @@ export function getBoneDefs(character, customRigs) {
 export function computeCharacterWorld(character, customRigs) {
   const defs = getBoneDefs(character, customRigs);
   const rootAngle = character.kind === 'custom' ? 0 : UP;
-  return computeFK(defs, character.bones || {}, { x: character.x, y: character.y }, rootAngle);
+  return computeFK(defs, character.bones || {}, { x: character.x, y: character.y }, rootAngle, character.severed || {});
+}
+
+export function getRootJointId(character, customRigs) {
+  if (character.kind === 'custom') return customRigs[character.customRigId]?.rootId ?? 'hips';
+  return 'hips';
+}
+
+// Payload for the "Sever Bone" action: freezes the joint's current world
+// position/angle so detaching it doesn't cause a visual jump.
+export function computeSeverPayload(character, customRigs, jointId) {
+  const world = computeCharacterWorld(character, customRigs);
+  const p = world.get(jointId);
+  if (!p) return null;
+  return { x: p.x, y: p.y, angle: p.worldAngle };
+}
+
+// Payload for "Reattach Bone": converts the joint's current (absolute,
+// severed) world angle back into a parent-relative local angle so it holds
+// its current pose instead of snapping.
+export function computeReattachPayload(character, customRigs, jointId) {
+  const world = computeCharacterWorld(character, customRigs);
+  const defs = getBoneDefs(character, customRigs);
+  const parentId = defs.find((d) => d.id === jointId)?.parentId ?? null;
+  const p = world.get(jointId);
+  if (!p) return null;
+  const parent = parentId ? world.get(parentId) : null;
+  const angle = parent ? p.worldAngle - parent.worldAngle : p.worldAngle;
+  return { angle };
 }
 
 function drawLimb(ctx, a, b, width, color) {
@@ -99,6 +127,13 @@ function drawRobe(ctx, hips, lFoot, rFoot, color) {
 export function drawBuiltInCharacter(ctx, character, world, selected) {
   const style = RIG_TYPES[character.rigType] || RIG_TYPES.ghost;
   const j = (id) => world.get(id);
+  const severed = character.severed || {};
+  // Draw a limb segment only if its distal (child) joint hasn't been severed
+  // — a severed joint should look detached, not rubber-banded to its parent.
+  const seg = (parentId, childId, width, color) => {
+    if (severed[childId]) return;
+    drawLimb(ctx, j(parentId), j(childId), width, color);
+  };
 
   if (style.smokeTrail) {
     ctx.strokeStyle = style.robeColor;
@@ -111,18 +146,18 @@ export function drawBuiltInCharacter(ctx, character, world, selected) {
   } else if (style.robeLegs) {
     drawRobe(ctx, j('hips'), j('lFoot'), j('rFoot'), style.robeColor);
   } else {
-    drawLimb(ctx, j('lHip'), j('lKnee'), style.limbWidth, style.skin);
-    drawLimb(ctx, j('lKnee'), j('lFoot'), style.limbWidth * 0.85, style.skin);
-    drawLimb(ctx, j('rHip'), j('rKnee'), style.limbWidth, style.skin);
-    drawLimb(ctx, j('rKnee'), j('rFoot'), style.limbWidth * 0.85, style.skin);
+    seg('lHip', 'lKnee', style.limbWidth, style.skin);
+    seg('lKnee', 'lFoot', style.limbWidth * 0.85, style.skin);
+    seg('rHip', 'rKnee', style.limbWidth, style.skin);
+    seg('rKnee', 'rFoot', style.limbWidth * 0.85, style.skin);
   }
 
-  drawLimb(ctx, j('hips'), j('chest'), style.limbWidth * 1.3, style.skin);
-  drawLimb(ctx, j('lShoulder'), j('lElbow'), style.limbWidth, style.skin);
-  drawLimb(ctx, j('lElbow'), j('lHand'), style.limbWidth * 0.85, style.skin);
-  drawLimb(ctx, j('rShoulder'), j('rElbow'), style.limbWidth, style.skin);
-  drawLimb(ctx, j('rElbow'), j('rHand'), style.limbWidth * 0.85, style.skin);
-  drawLimb(ctx, j('neck'), j('head'), style.limbWidth * 0.7, style.skin);
+  seg('hips', 'chest', style.limbWidth * 1.3, style.skin);
+  seg('lShoulder', 'lElbow', style.limbWidth, style.skin);
+  seg('lElbow', 'lHand', style.limbWidth * 0.85, style.skin);
+  seg('rShoulder', 'rElbow', style.limbWidth, style.skin);
+  seg('rElbow', 'rHand', style.limbWidth * 0.85, style.skin);
+  seg('neck', 'head', style.limbWidth * 0.7, style.skin);
 
   const head = j('head');
   ctx.fillStyle = style.skin;
@@ -167,4 +202,55 @@ export function drawCustomCharacter(ctx, character, world, customRigs) {
   // so the blended warp output lands directly in world space too.
   const warped = warpVertices(rig.mesh, rig.weights, rig.bindPositions, Object.fromEntries(world), rig.bindWorldAngle);
   drawWarpedMesh(ctx, rig.imageEl, rig.mesh, warped);
+}
+
+// Glowing skeleton overlay for a selected custom rig: bright connecting
+// lines (blood red for the head/face cluster, neon green for the body) plus
+// shape-distinct joint markers (triangle = head, small dot = facial node,
+// circle = regular joint). Severed joints draw with no connecting line to
+// their old parent and a gold marker, matching the Bone Editor's language.
+export function drawSkeletonOverlay(ctx, character, world, customRigs, zoom) {
+  const rig = customRigs[character.customRigId];
+  if (!rig) return;
+  const severed = character.severed || {};
+
+  ctx.save();
+  ctx.lineWidth = 2 / zoom;
+  rig.joints.forEach((joint) => {
+    if (!joint.parentId || severed[joint.id]) return;
+    const a = world.get(joint.parentId);
+    const b = world.get(joint.id);
+    if (!a || !b) return;
+    const color = joint.id === 'head' || joint.facial ? 'rgba(255,46,77,0.9)' : 'rgba(57,255,106,0.9)';
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+
+  rig.joints.forEach((joint) => {
+    const p = world.get(joint.id);
+    if (!p) return;
+    const isSevered = !!severed[joint.id];
+    const r = (joint.shape === 'dot' ? 3 : joint.shape === 'triangle' ? 6 : 5) / zoom;
+    ctx.fillStyle = isSevered ? '#ffd76b' : joint.shape === 'triangle' ? '#ff2e4d' : joint.facial ? '#ff8fa3' : '#39ff6a';
+    ctx.beginPath();
+    if (joint.shape === 'triangle') {
+      ctx.moveTo(p.x, p.y - r * 1.3);
+      ctx.lineTo(p.x - r * 1.1, p.y + r * 0.8);
+      ctx.lineTo(p.x + r * 1.1, p.y + r * 0.8);
+      ctx.closePath();
+    } else {
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1 / zoom;
+    ctx.stroke();
+  });
+  ctx.restore();
 }

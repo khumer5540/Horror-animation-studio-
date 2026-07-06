@@ -1,8 +1,16 @@
 import { POSE_PRESETS, DRAGGABLE_JOINTS, RIG_TYPES } from '../data/rigTypes.js';
+import { computeReattachPayload } from '../engine/renderCharacter.js';
 
 const PRESET_LABEL = {
   stand: 'Stand', wave: 'Wave', punch: 'Punch', kick: 'Kick', float: 'Float', crouch: 'Crouch',
 };
+
+function humanizeJointId(id) {
+  if (id.length > 1 && (id[0] === 'l' || id[0] === 'r') && id[1] === id[1].toUpperCase()) {
+    return `${id[0].toUpperCase()} ${id.slice(1)}`;
+  }
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
 
 export default function PosePanel({ state, dispatch }) {
   const sel = state.selection;
@@ -24,6 +32,13 @@ export default function PosePanel({ state, dispatch }) {
     const rig = isCustom ? state.customRigs[c.customRigId] : null;
     const style = isCustom ? null : RIG_TYPES[c.rigType];
     const joints = isCustom ? rig?.joints.map((j) => j.id) : DRAGGABLE_JOINTS;
+    const jointLabel = (jointId) => (isCustom ? rig?.joints.find((j) => j.id === jointId)?.label || jointId : humanizeJointId(jointId));
+    const severedIds = Object.keys(c.severed || {});
+
+    function reattach(jointId) {
+      const payload = computeReattachPayload(c, state.customRigs, jointId);
+      if (payload) dispatch({ type: 'REATTACH_JOINT', id: c.id, jointId, angle: payload.angle });
+    }
 
     return (
       <div className="panel pose-panel">
@@ -37,7 +52,22 @@ export default function PosePanel({ state, dispatch }) {
             ))}
           </div>
         )}
-        <p className="hint">{joints?.length || 0} draggable joints. Drag any glowing pin on the stage to pose.</p>
+        <p className="hint">{joints?.length || 0} draggable joints. Drag any glowing pin on the stage to pose. Right-click a joint to Sever/Reattach it.</p>
+
+        {severedIds.length > 0 && (
+          <>
+            <h4>Severed Joints</h4>
+            <div className="severed-list">
+              {severedIds.map((jointId) => (
+                <div key={jointId} className="severed-row">
+                  <span>{jointLabel(jointId)}</span>
+                  <button className="btn-ghost small" onClick={() => reattach(jointId)}>Reattach</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         <button className="btn-danger" onClick={() => dispatch({ type: 'DELETE_CHARACTER', id: c.id })}>Delete Character</button>
       </div>
     );
@@ -95,7 +125,7 @@ function AttachControls({ state, prop, dispatch }) {
             >
               <option value="" disabled>attach to…</option>
               {joints.map((j) => (
-                <option key={j.id} value={j.id}>{j.name || j.id}</option>
+                <option key={j.id} value={j.id}>{j.name || j.label || j.id}</option>
               ))}
             </select>
           </div>

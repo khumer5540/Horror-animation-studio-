@@ -35,6 +35,7 @@ export function projectReducer(state, action) {
         x: action.x ?? 200 + state.characters.length * 60,
         y: action.y ?? 300,
         bones: {},
+        severed: {},
       };
       return { ...state, characters: [...state.characters, char], selection: { type: 'character', id: char.id } };
     }
@@ -46,6 +47,7 @@ export function projectReducer(state, action) {
         x: action.x ?? 300,
         y: action.y ?? 300,
         bones: {},
+        severed: {},
       };
       return { ...state, characters: [...state.characters, char], selection: { type: 'character', id: char.id } };
     }
@@ -63,9 +65,35 @@ export function projectReducer(state, action) {
                 x: action.x ?? c.x,
                 y: action.y ?? c.y,
                 bones: action.bones ? { ...cloneBones(c.bones), ...action.bones } : c.bones,
+                severed: action.severed ? { ...(c.severed || {}), ...action.severed } : c.severed,
               }
             : c
         ),
+      };
+    }
+    case 'SEVER_JOINT': {
+      return {
+        ...state,
+        characters: state.characters.map((c) =>
+          c.id === action.id
+            ? {
+                ...c,
+                severed: { ...(c.severed || {}), [action.jointId]: { x: action.x, y: action.y } },
+                bones: { ...(c.bones || {}), [action.jointId]: action.angle },
+              }
+            : c
+        ),
+      };
+    }
+    case 'REATTACH_JOINT': {
+      return {
+        ...state,
+        characters: state.characters.map((c) => {
+          if (c.id !== action.id) return c;
+          const severed = { ...(c.severed || {}) };
+          delete severed[action.jointId];
+          return { ...c, severed, bones: { ...(c.bones || {}), [action.jointId]: action.angle } };
+        }),
       };
     }
     case 'APPLY_POSE_PRESET': {
@@ -188,7 +216,9 @@ export function projectReducer(state, action) {
         const data = sampleTrack(track.keyframes, time);
         if (!data) continue;
         if (track.targetType === 'character') {
-          characters = characters.map((c) => (c.id === track.targetId ? { ...c, x: data.x, y: data.y, bones: { ...data.bones } } : c));
+          characters = characters.map((c) =>
+            c.id === track.targetId ? { ...c, x: data.x, y: data.y, bones: { ...data.bones }, severed: { ...(data.severed || {}) } } : c
+          );
         } else if (track.targetType === 'prop') {
           props = props.map((p) => (p.id === track.targetId ? { ...p, x: data.x, y: data.y, rotation: data.rotation, scale: data.scale } : p));
         } else if (track.targetType === 'camera') {
@@ -206,7 +236,7 @@ export function captureEntityData(state, targetType, targetId) {
   if (targetType === 'character') {
     const c = state.characters.find((ch) => ch.id === targetId);
     if (!c) return null;
-    return { x: c.x, y: c.y, bones: { ...c.bones } };
+    return { x: c.x, y: c.y, bones: { ...c.bones }, severed: { ...(c.severed || {}) } };
   }
   if (targetType === 'prop') {
     const p = state.props.find((pr) => pr.id === targetId);
