@@ -12,7 +12,7 @@ import { solveLocalAngleForTarget } from '../engine/skeleton.js';
 import { DRAGGABLE_JOINTS, HUMANOID_BONES } from '../data/rigTypes.js';
 import { PROP_TYPES } from '../data/props.js';
 
-const HIT_PX = 15;
+const HIT_PX = 22; // generous enough for a fingertip, not just a mouse cursor
 const BG_THEMES = {
   crypt: ['#0b0810', '#1c1420'],
   fog: ['#141821', '#26303f'],
@@ -225,8 +225,8 @@ export default function Stage({ state, dispatch }) {
       const ly = dx * sin + dy * cos;
       if (state.selection?.type === 'prop' && state.selection.id === p.id) {
         const zoom = s.camera.zoom;
-        if (Math.abs(lx) < 10 / zoom && ly < -r - 12 / zoom && ly > -r - 32 / zoom) return { propId: p.id, mode: 'rotate-prop', t };
-        if (Math.abs(lx - r) < 12 / zoom && Math.abs(ly - r) < 12 / zoom) return { propId: p.id, mode: 'scale-prop', t };
+        if (Math.abs(lx) < 16 / zoom && ly < -r - 10 / zoom && ly > -r - 34 / zoom) return { propId: p.id, mode: 'rotate-prop', t };
+        if (Math.abs(lx - r) < 18 / zoom && Math.abs(ly - r) < 18 / zoom) return { propId: p.id, mode: 'scale-prop', t };
       }
       if (Math.abs(lx) < r && Math.abs(ly) < r) return { propId: p.id, mode: 'move-prop', t };
     }
@@ -235,6 +235,10 @@ export default function Stage({ state, dispatch }) {
 
   function handlePointerDown(e) {
     if (e.button !== 0) return; // right/middle click: handled by onContextMenu instead
+    // Pointer capture keeps move/up events routed to the canvas even once the
+    // pointer travels outside its bounds — essential for fast touch drags,
+    // which otherwise silently stop delivering pointermove past the edge.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const wp = getWorldPoint(e.clientX, e.clientY);
     const jointHit = findJointHit(wp);
     if (jointHit) {
@@ -256,6 +260,7 @@ export default function Stage({ state, dispatch }) {
   function handlePointerMove(e) {
     const drag = dragRef.current;
     if (!drag) return;
+    e.preventDefault();
     const s = stateRef.current;
 
     if (drag.mode === 'pan') {
@@ -307,7 +312,10 @@ export default function Stage({ state, dispatch }) {
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e) {
+    if (e?.currentTarget?.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     dragRef.current = null;
   }
 
@@ -399,6 +407,7 @@ export default function Stage({ state, dispatch }) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onContextMenu={handleContextMenu}
       />
       <div className="zoom-indicator">{Math.round(state.camera.zoom * 100)}%</div>

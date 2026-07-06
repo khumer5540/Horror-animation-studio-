@@ -49,8 +49,14 @@ export default function BoneEditorModal({ onClose, onSave }) {
     return (e) => {
       e.stopPropagation();
       e.preventDefault();
+      // Pointer capture so fast touch drags keep reporting to this node even
+      // once the finger moves off it; window listeners still catch the
+      // move/up regardless, but capture also stops iOS from treating the
+      // gesture as a page scroll mid-drag.
+      e.currentTarget.setPointerCapture?.(e.pointerId);
       setDraggingId(jointId);
       function onMove(ev) {
+        ev.preventDefault();
         const rect = imgRef.current.getBoundingClientRect();
         const scale = image.width / rect.width;
         const x = clamp((ev.clientX - rect.left) * scale, 0, image.width);
@@ -61,9 +67,11 @@ export default function BoneEditorModal({ onClose, onSave }) {
         setDraggingId(null);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
       }
-      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointermove', onMove, { passive: false });
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
     };
   }
 
@@ -184,6 +192,10 @@ export default function BoneEditorModal({ onClose, onSave }) {
                         onPointerDown={startDragNode(j.id)}
                         filter={isDragging ? 'url(#boneGlow)' : undefined}
                       >
+                        {/* Invisible, generously-sized hit area — the visible
+                            markers (esp. facial dots) are too small to
+                            reliably grab with a fingertip. */}
+                        <circle cx={cx} cy={cy} r={j.facial ? 12 : 16} fill="transparent" />
                         {j.shape === 'triangle' ? (
                           <polygon
                             points={`${cx},${cy - r * 1.3} ${cx - r * 1.1},${cy + r * 0.8} ${cx + r * 1.1},${cy + r * 0.8}`}

@@ -32,13 +32,18 @@ export default function Timeline({ state, dispatch }) {
   function handleRulerDown(e) {
     dispatch({ type: 'SET_PLAYING', playing: false });
     scrubTo(e.clientX);
-    function onMove(ev) { scrubTo(ev.clientX); }
+    function onMove(ev) {
+      ev.preventDefault();
+      scrubTo(ev.clientX);
+    }
     function onUp() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     }
-    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointermove', onMove, { passive: false });
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }
 
   function addKeyframeFor(targetType, targetId) {

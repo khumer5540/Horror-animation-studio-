@@ -187,6 +187,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   user-select: none;
+  touch-action: none;
 }
 .ruler-tick { position: absolute; top: 0; font-size: 10px; color: var(--text-dim); transform: translateX(-2px); }
 .playhead {
@@ -233,6 +234,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   max-width: 92vw;
   max-height: 90vh;
   overflow: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 0 40px rgba(139, 15, 31, 0.4);
 }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -244,9 +246,9 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .bone-editor-body { display: flex; gap: 20px; }
 .bone-editor-canvas-wrap { flex-shrink: 0; width: 480px; }
 .bone-editor-canvas-wrap .hint { max-width: 460px; }
-.bone-editor-canvas { position: relative; }
-.bone-editor-canvas img { display: block; user-select: none; border-radius: 4px; border: 1px solid var(--border); }
-.bone-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+.bone-editor-canvas { position: relative; touch-action: none; }
+.bone-editor-canvas img { display: block; user-select: none; border-radius: 4px; border: 1px solid var(--border); touch-action: none; }
+.bone-overlay { position: absolute; top: 0; left: 0; pointer-events: none; touch-action: none; }
 .bone-overlay-interactive .bone-node { pointer-events: all; cursor: grab; touch-action: none; }
 .bone-overlay-interactive .bone-node:active { cursor: grabbing; }
 .bone-editor-actions-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
@@ -282,3 +284,26 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   cursor: pointer;
 }
 .stage-context-menu button:hover { background: var(--blood); color: #fff; }
+
+/* Narrow / mobile viewports: the two fixed-230px side panels alone exceed a
+   phone's width, which was squeezing the stage canvas down to 0px wide and
+   making the whole stage untouchable. Stack everything in a single normally-
+   flowing, page-scrollable column instead (not a 100vh app-shell with an
+   internally-scrolled middle region — that trapped the tall stacked content
+   behind a short flex:1 box, so the canvas overflowed invisibly and touches
+   landed on the Timeline sitting underneath it instead). */
+@media (max-width: 860px) {
+  #root { height: auto; min-height: 100vh; overflow: visible; }
+  .app { height: auto; min-height: 100vh; }
+  .app-body { flex-direction: column; overflow: visible; }
+  .props-panel, .pose-panel {
+    width: 100%;
+    flex-shrink: 0;
+    max-height: 240px;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .stage-wrap { flex: none; width: 100%; height: 60vh; min-height: 340px; }
+  .timeline { flex-shrink: 0; }
+}
