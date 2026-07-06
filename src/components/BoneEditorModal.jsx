@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { uid } from '../utils/id.js';
-import { buildGrid, computeWeights } from '../engine/meshWarp.js';
+import { buildGrid, assignTriangleBones } from '../engine/meshWarp.js';
 import { instantiateMetaRig } from '../data/metaRig.js';
 
 function loadImage(dataUrl) {
@@ -125,7 +125,7 @@ export default function BoneEditorModal({ onClose, onSave }) {
     const cols = 12;
     const rows = Math.max(6, Math.min(20, Math.round((12 * image.height) / image.width)));
     const mesh = buildGrid(image.width, image.height, cols, rows);
-    const weights = computeWeights(mesh, joints.map((j) => ({ id: j.id, x: j.x, y: j.y })));
+    const triangleBones = assignTriangleBones(mesh, joints.map((j) => ({ id: j.id, x: j.x, y: j.y, parentId: j.parentId })));
 
     const rig = {
       id: uid('rig'),
@@ -139,7 +139,7 @@ export default function BoneEditorModal({ onClose, onSave }) {
       bindPositions,
       bindWorldAngle,
       mesh,
-      weights,
+      triangleBones,
     };
     onSave(rig);
   }

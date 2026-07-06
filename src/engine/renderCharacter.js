@@ -1,6 +1,6 @@
 import { computeFK, UP } from './skeleton.js';
 import { HUMANOID_BONES, RIG_TYPES } from '../data/rigTypes.js';
-import { warpVertices, drawWarpedMesh } from './meshWarp.js';
+import { drawRigidCutoutMesh } from './meshWarp.js';
 
 export function getBoneDefs(character, customRigs) {
   if (character.kind === 'custom') {
@@ -196,12 +196,11 @@ export function drawBuiltInCharacter(ctx, character, world, selected) {
 
 export function drawCustomCharacter(ctx, character, world, customRigs) {
   const rig = customRigs[character.customRigId];
-  if (!rig || !rig.imageEl) return;
-  // Mesh vertices are bound in image-local space; joint world positions
-  // (from FK, rooted at character.x/y) are already in canvas world space,
-  // so the blended warp output lands directly in world space too.
-  const warped = warpVertices(rig.mesh, rig.weights, rig.bindPositions, Object.fromEntries(world), rig.bindWorldAngle);
-  drawWarpedMesh(ctx, rig.imageEl, rig.mesh, warped);
+  if (!rig || !rig.imageEl || !rig.triangleBones) return;
+  // Joint world positions (from FK, rooted at character.x/y) are already in
+  // canvas world space, so each rigidly-transformed triangle lands directly
+  // in world space too — no extra transform needed here.
+  drawRigidCutoutMesh(ctx, rig.imageEl, rig.mesh, rig.triangleBones, rig.bindPositions, world, rig.bindWorldAngle);
 }
 
 // Glowing skeleton overlay for a selected custom rig: bright connecting

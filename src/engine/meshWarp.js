@@ -1,12 +1,20 @@
-// Mesh-based skinning for the Custom Rig Builder.
+// Rigid "cutout puppet" rendering for the Custom Rig Builder.
 //
-// A user uploads a flat image and drops "Joint Nodes" onto it. We build a
-// regular grid mesh over the image, weight each grid vertex to nearby joints
-// (bind-pose inverse-distance weighting — classic linear-blend "puppet"
-// skinning), then each frame we recompute the joints' FK positions and warp
-// the mesh, drawing it triangle-by-triangle with an affine image transform.
-// This gives real per-joint deformation of a single raster image without
-// requiring the user to pre-cut layers.
+// A user uploads a flat image; we build a triangulated grid over it, then
+// assign each triangle to whichever single bone (Meta-Rig segment) it sits
+// closest to in bind pose. At render time, every triangle is transformed by
+// ONLY its owning bone's rigid rotation+translation (never blended with any
+// other bone) and drawn with an affine image transform.
+//
+// This intentionally replaces an earlier linear-blend-skinning version: any
+// blend across multiple bones interpolates position linearly while bones
+// rotate, which stretches/tears the texture like a rubber band once a limb
+// rotates far from its bind pose. A pure per-triangle rigid transform can
+// never stretch or shear the source pixels — each triangle is always drawn
+// at exactly its original size and shape, just rotated and moved, like a
+// paper cutout. The tradeoff is a visible seam at segment boundaries once a
+// joint bends a lot; the joint's own marker (drawn on selection) sits right
+// on top of that seam, which is also how real paper-puppet rigs hide it.
 
 function det3(m) {
   return (
@@ -71,59 +79,66 @@ export function buildGrid(width, height, cols = 12, rows = 16) {
   return { vertices, triangles, width, height };
 }
 
-// joints: [{ id, x, y }] in bind (image-space) coordinates
-export function computeWeights(mesh, joints, falloff = 2) {
-  if (joints.length === 0) return mesh.vertices.map(() => ({}));
-  return mesh.vertices.map((v) => {
-    const raw = joints.map((j) => {
-      const d = Math.hypot(v.x - j.x, v.y - j.y) + 1e-3;
-      return 1 / Math.pow(d, falloff);
-    });
-    const sum = raw.reduce((s, w) => s + w, 0);
-    const weights = {};
-    joints.forEach((j, i) => {
-      weights[j.id] = raw[i] / sum;
-    });
-    return weights;
-  });
+function pointToSegmentDistance(p, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const abLenSq = abx * abx + aby * aby;
+  let t = abLenSq > 1e-9 ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / abLenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + t * abx;
+  const cy = a.y + t * aby;
+  return Math.hypot(p.x - cx, p.y - cy);
 }
 
-// jointsBind: { id: {x,y} } bind position (image space)
-// jointsNow: { id: {x,y,worldAngle} } current FK position
-// jointsBindAngle: { id: worldAngle } bind world angle
-export function warpVertices(mesh, weights, jointsBind, jointsNow, jointsBindAngle) {
-  const ids = Object.keys(jointsBind);
-  return mesh.vertices.map((v, vi) => {
-    let x = 0;
-    let y = 0;
-    const w = weights[vi];
-    for (const id of ids) {
-      const weight = w[id];
-      if (!weight) continue;
-      const bind = jointsBind[id];
-      const now = jointsNow[id];
-      if (!now) continue;
-      const dTheta = now.worldAngle - jointsBindAngle[id];
-      const dx = v.x - bind.x;
-      const dy = v.y - bind.y;
-      const cos = Math.cos(dTheta);
-      const sin = Math.sin(dTheta);
-      const rx = dx * cos - dy * sin;
-      const ry = dx * sin + dy * cos;
-      x += weight * (now.x + rx);
-      y += weight * (now.y + ry);
+// joints: [{ id, x, y, parentId }] bind (image-space) positions. Assigns
+// each triangle to the single bone (the segment from its parent's bind
+// position to its own) whose line it sits closest to, by centroid distance.
+export function assignTriangleBones(mesh, joints) {
+  const byId = new Map(joints.map((j) => [j.id, j]));
+  return mesh.triangles.map(([i0, i1, i2]) => {
+    const v0 = mesh.vertices[i0];
+    const v1 = mesh.vertices[i1];
+    const v2 = mesh.vertices[i2];
+    const centroid = { x: (v0.x + v1.x + v2.x) / 3, y: (v0.y + v1.y + v2.y) / 3 };
+    let bestId = joints[0]?.id ?? null;
+    let bestDist = Infinity;
+    for (const j of joints) {
+      const parent = j.parentId ? byId.get(j.parentId) : j;
+      const d = pointToSegmentDistance(centroid, parent, j);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = j.id;
+      }
     }
-    return { x, y };
+    return bestId;
   });
 }
 
-// Draw the warped image onto ctx. `image` is a CanvasImageSource sized to
-// mesh.width x mesh.height. ctx should already have camera/character
-// transform applied; this draws in the character's local space.
-export function drawWarpedMesh(ctx, image, mesh, warped) {
-  for (const [i0, i1, i2] of mesh.triangles) {
+// Rigidly transforms and draws each triangle by its assigned bone only (no
+// blending), so the source image is rotated/translated but never stretched.
+// bindPositions: { id: {x,y} }, jointsNow: { id: {x,y,worldAngle} } (Map or
+// plain object both work since we only ever read by key), bindWorldAngle:
+// { id: worldAngle }.
+export function drawRigidCutoutMesh(ctx, image, mesh, triangleBones, bindPositions, jointsNow, bindWorldAngle) {
+  const now = jointsNow instanceof Map ? (id) => jointsNow.get(id) : (id) => jointsNow[id];
+  for (let t = 0; t < mesh.triangles.length; t += 1) {
+    const ownerId = triangleBones[t];
+    const bindOwner = bindPositions[ownerId];
+    const nowOwner = now(ownerId);
+    if (!bindOwner || !nowOwner) continue;
+    const dTheta = nowOwner.worldAngle - bindWorldAngle[ownerId];
+    const cos = Math.cos(dTheta);
+    const sin = Math.sin(dTheta);
+    const [i0, i1, i2] = mesh.triangles[t];
     const src = [mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2]];
-    const dst = [warped[i0], warped[i1], warped[i2]];
+    const dst = src.map((v) => {
+      const dx = v.x - bindOwner.x;
+      const dy = v.y - bindOwner.y;
+      return {
+        x: nowOwner.x + (dx * cos - dy * sin),
+        y: nowOwner.y + (dx * sin + dy * cos),
+      };
+    });
     const { a, b, c, d, e, f } = affineFrom3Points(src, dst);
     ctx.save();
     ctx.beginPath();
