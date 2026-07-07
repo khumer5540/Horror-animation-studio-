@@ -41,9 +41,25 @@ character.
     real paper-puppet pin.
 - **Image-to-Prop** — upload a static image as a scalable, rotatable prop
   without rigging it.
+- **Custom Background** — upload a JPEG/PNG/WEBP next to the Scene dropdown
+  in the toolbar to replace the gradient backdrop; it's drawn cover-fit
+  (cropped, never stretched) as the bottom-most layer of the stage, fixed
+  in screen space so it doesn't pan/zoom with the camera.
+- **Lighting & Atmosphere** — a "Lighting" tab next to Effects in the left
+  panel with two toggles: Vignette (darkens the screen edges) and Flicker
+  (an animated brightness jitter simulating a failing light). Both are
+  simple on/off toggles rather than keyframeable tracks in this version.
 - **Timeline** — per-character/prop/camera keyframe tracks, ease-in-out
   auto-tweening, scrubbing, and playback. Camera zoom/pan is itself
-  keyframeable for cinematic close-ups.
+  keyframeable for cinematic close-ups. A dedicated Audio Track row lets
+  you upload an MP3/WAV; playback play()/pause()s and seeks the audio in
+  sync with the frame cursor.
+- **Undo/Redo** — ↩️/↪️ buttons in the toolbar (also Ctrl+Z / Ctrl+Shift+Z),
+  backed by a full state history stack covering node positions, keyframes,
+  prop/character add-remove, custom rig imports, background/lighting/audio
+  changes, and more. A whole drag gesture (posing a joint, moving a prop)
+  is one undo step, not one step per pixel of motion; camera pan/zoom,
+  selection, and playback scrubbing are intentionally not undo-tracked.
 - **Export** — records the stage via `canvas.captureStream()` +
   `MediaRecorder` and downloads a WebM file.
 

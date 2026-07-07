@@ -20,6 +20,48 @@ const BG_THEMES = {
   void: ['#000000', '#0a0a0a'],
 };
 
+// Draws `img` to fill (dw x dh) exactly, cropping instead of stretching —
+// the canvas equivalent of CSS `background-size: cover`.
+function drawImageCover(ctx, img, dw, dh) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const imageRatio = iw / ih;
+  const destRatio = dw / dh;
+  let sx = 0;
+  let sy = 0;
+  let sw = iw;
+  let sh = ih;
+  if (imageRatio > destRatio) {
+    sw = ih * destRatio;
+    sx = (iw - sw) / 2;
+  } else {
+    sh = iw / destRatio;
+    sy = (ih - sh) / 2;
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+}
+
+function drawLightingOverlays(ctx, lighting, w, h) {
+  if (lighting?.vignette) {
+    const cx = w / 2;
+    const cy = h / 2;
+    const outer = Math.hypot(cx, cy);
+    const vg = ctx.createRadialGradient(cx, cy, outer * 0.35, cx, cy, outer);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.8)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+  }
+  if (lighting?.flicker) {
+    const t = performance.now() / 1000;
+    let alpha = 0.1 + 0.06 * Math.sin(t * 14) + 0.05 * Math.sin(t * 31 + 1.3);
+    if (Math.random() < 0.02) alpha += 0.3; // occasional deeper dip, like a failing tube light
+    alpha = Math.max(0, Math.min(0.6, alpha));
+    ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
 export default function Stage({ state, dispatch }) {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
@@ -68,12 +110,16 @@ export default function Stage({ state, dispatch }) {
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const [c1, c2] = BG_THEMES[state.settings.background] || BG_THEMES.crypt;
-    const grad = ctx.createLinearGradient(0, 0, 0, rect.height);
-    grad.addColorStop(0, c1);
-    grad.addColorStop(1, c2);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, rect.width, rect.height);
+    if (state.settings.backgroundImage) {
+      drawImageCover(ctx, state.settings.backgroundImage, rect.width, rect.height);
+    } else {
+      const [c1, c2] = BG_THEMES[state.settings.background] || BG_THEMES.crypt;
+      const grad = ctx.createLinearGradient(0, 0, 0, rect.height);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(1, c2);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, rect.width, rect.height);
+    }
 
     ctx.save();
     ctx.translate(rect.width / 2, rect.height / 2);
@@ -157,6 +203,8 @@ export default function Stage({ state, dispatch }) {
     });
 
     ctx.restore();
+
+    drawLightingOverlays(ctx, state.lighting, rect.width, rect.height);
   }, [state]);
 
   useEffect(() => {
@@ -242,6 +290,9 @@ export default function Stage({ state, dispatch }) {
     const wp = getWorldPoint(e.clientX, e.clientY);
     const jointHit = findJointHit(wp);
     if (jointHit) {
+      // One undo checkpoint per whole drag gesture, not per pointermove —
+      // UPDATE_CHARACTER_POSE dispatches during the drag itself are transient.
+      dispatch({ type: 'BEGIN_INTERACTION' });
       dispatch({ type: 'SELECT', selection: { type: 'character', id: jointHit.characterId } });
       const mode = jointHit.isRoot ? 'move-character' : jointHit.isSevered ? 'move-severed-joint' : 'rotate-joint';
       dragRef.current = { mode, ...jointHit, startWorld: wp };
@@ -249,6 +300,7 @@ export default function Stage({ state, dispatch }) {
     }
     const propHit = findPropHit(wp);
     if (propHit) {
+      dispatch({ type: 'BEGIN_INTERACTION' });
       if (propHit.mode === 'move-prop') dispatch({ type: 'SELECT', selection: { type: 'prop', id: propHit.propId } });
       dragRef.current = { ...propHit, startWorld: wp };
       return;

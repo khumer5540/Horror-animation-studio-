@@ -3,12 +3,14 @@ import { sampleTrack } from '../engine/tween.js';
 
 export function createInitialProject() {
   return {
-    settings: { fps: 24, duration: 10, resolution: '1080p', background: 'crypt' },
+    settings: { fps: 24, duration: 10, resolution: '1080p', background: 'crypt', backgroundImage: null },
     characters: [],
     props: [],
     customRigs: {},
     camera: { x: 300, y: 220, zoom: 1 },
     selection: null, // { type: 'character'|'prop', id }
+    lighting: { vignette: false, flicker: false },
+    audio: { src: null, name: null },
     timeline: {
       playhead: 0,
       playing: false,
@@ -183,6 +185,15 @@ export function projectReducer(state, action) {
     }
     case 'SET_SETTINGS': {
       return { ...state, settings: { ...state.settings, ...action.patch } };
+    }
+    case 'SET_BACKGROUND_IMAGE': {
+      return { ...state, settings: { ...state.settings, backgroundImage: action.image } };
+    }
+    case 'SET_LIGHTING': {
+      return { ...state, lighting: { ...state.lighting, ...action.patch } };
+    }
+    case 'SET_AUDIO_TRACK': {
+      return { ...state, audio: { src: action.src, name: action.name } };
     }
     case 'ADD_KEYFRAME': {
       const key = trackKey(action.targetType, action.targetId);

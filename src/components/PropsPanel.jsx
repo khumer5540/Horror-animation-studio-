@@ -6,11 +6,15 @@ const CATEGORY_LABEL = {
   weapons: 'Weapons',
   objects: 'Objects',
   environment: 'Environment',
+  lighting: 'Lighting',
 };
+
+const TABS = [...PROP_CATEGORIES, 'lighting'];
 
 export default function PropsPanel({ state, dispatch }) {
   const [category, setCategory] = useState('effects');
-  const items = getPropsByCategory(category);
+  const isLighting = category === 'lighting';
+  const items = isLighting ? [] : getPropsByCategory(category);
 
   function addProp(propType) {
     dispatch({
@@ -21,23 +25,54 @@ export default function PropsPanel({ state, dispatch }) {
     });
   }
 
+  function toggleLighting(key) {
+    dispatch({ type: 'SET_LIGHTING', patch: { [key]: !state.lighting[key] } });
+  }
+
   return (
     <div className="panel props-panel">
       <div className="panel-tabs">
-        {PROP_CATEGORIES.map((cat) => (
+        {TABS.map((cat) => (
           <button key={cat} className={cat === category ? 'tab active' : 'tab'} onClick={() => setCategory(cat)}>
             {CATEGORY_LABEL[cat]}
           </button>
         ))}
       </div>
-      <div className="prop-grid">
-        {items.map((p) => (
-          <button key={p.id} className="prop-tile" onClick={() => addProp(p.id)} title={p.label}>
-            <PropThumb draw={p.draw} />
-            <span>{p.label}</span>
-          </button>
-        ))}
-      </div>
+
+      {isLighting ? (
+        <div className="lighting-panel">
+          <label className="toggle-row">
+            <span>Vignette</span>
+            <span
+              className={`toggle-switch ${state.lighting.vignette ? 'on' : ''}`}
+              role="switch"
+              aria-checked={state.lighting.vignette}
+              onClick={() => toggleLighting('vignette')}
+            />
+          </label>
+          <p className="hint">Darkens the edges of the screen, focusing attention on the center.</p>
+
+          <label className="toggle-row">
+            <span>Flicker</span>
+            <span
+              className={`toggle-switch ${state.lighting.flicker ? 'on' : ''}`}
+              role="switch"
+              aria-checked={state.lighting.flicker}
+              onClick={() => toggleLighting('flicker')}
+            />
+          </label>
+          <p className="hint">Simulates a broken, jittering light source over the whole scene.</p>
+        </div>
+      ) : (
+        <div className="prop-grid">
+          {items.map((p) => (
+            <button key={p.id} className="prop-tile" onClick={() => addProp(p.id)} title={p.label}>
+              <PropThumb draw={p.draw} />
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

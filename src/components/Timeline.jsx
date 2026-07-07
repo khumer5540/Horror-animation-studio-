@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { captureEntityData } from '../state/project.js';
 
 function labelFor(state, targetType, targetId) {
@@ -14,8 +14,43 @@ function labelFor(state, targetType, targetId) {
 
 export default function Timeline({ state, dispatch }) {
   const rulerRef = useRef(null);
+  const audioRef = useRef(null);
+  const audioFileInput = useRef(null);
   const { duration, fps } = state.settings;
   const { playhead, playing, tracks } = state.timeline;
+  const audio = state.audio;
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.src = audio?.src || '';
+  }, [audio?.src]);
+
+  // Play/pause follows the timeline; seeking only happens while paused (a
+  // scrub) or right as playback restarts from a loop, so real-time playback
+  // doesn't fight the browser's own audio clock every frame.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !audio?.src) return;
+    if (playing) {
+      if (playhead < 0.05) el.currentTime = 0;
+      if (el.paused) el.play().catch(() => {});
+    } else {
+      el.pause();
+      el.currentTime = playhead;
+    }
+  }, [playing, playhead, audio?.src]);
+
+  function handleAudioFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (audio?.src) URL.revokeObjectURL(audio.src);
+    dispatch({ type: 'SET_AUDIO_TRACK', src: URL.createObjectURL(file), name: file.name });
+    e.target.value = '';
+  }
+
+  function clearAudio() {
+    if (audio?.src) URL.revokeObjectURL(audio.src);
+    dispatch({ type: 'SET_AUDIO_TRACK', src: null, name: null });
+  }
 
   function timeFromClientX(clientX) {
     const rect = rulerRef.current.getBoundingClientRect();
@@ -94,6 +129,22 @@ export default function Timeline({ state, dispatch }) {
       </div>
 
       <div className="timeline-tracks">
+        <div className="track-row audio-track-row">
+          <div className="track-label">
+            🔊 Audio
+            {audio?.name && <button className="btn-ghost small" onClick={clearAudio}>✕</button>}
+          </div>
+          <div className="track-lane">
+            {audio?.name ? (
+              <div className="audio-clip" title={audio.name}>{audio.name}</div>
+            ) : (
+              <button className="btn-ghost small" onClick={() => audioFileInput.current.click()}>+ Add Audio</button>
+            )}
+          </div>
+        </div>
+        <input ref={audioFileInput} type="file" accept="audio/mpeg,audio/wav,audio/*" style={{ display: 'none' }} onChange={handleAudioFile} />
+        <audio ref={audioRef} style={{ display: 'none' }} />
+
         {Object.entries(tracks).length === 0 && <p className="hint">No keyframes yet. Pose a character or prop, then click "Key Selected" (or "Key Camera").</p>}
         {Object.entries(tracks).map(([key, track]) => (
           <div className="track-row" key={key}>

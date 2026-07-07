@@ -10,8 +10,9 @@ function loadImage(dataUrl) {
   });
 }
 
-export default function Toolbar({ state, dispatch, onOpenBoneEditor, onOpenExport }) {
+export default function Toolbar({ state, dispatch, onOpenBoneEditor, onOpenExport, canUndo, canRedo }) {
   const staticPropInput = useRef(null);
+  const backgroundInput = useRef(null);
 
   async function handleStaticPropFile(e) {
     const file = e.target.files?.[0];
@@ -35,9 +36,26 @@ export default function Toolbar({ state, dispatch, onOpenBoneEditor, onOpenExpor
     e.target.value = '';
   }
 
+  async function handleBackgroundFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const el = await loadImage(reader.result);
+      dispatch({ type: 'SET_BACKGROUND_IMAGE', image: el });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
   return (
     <div className="toolbar">
       <div className="brand">🩸 HORROR STUDIO</div>
+
+      <div className="toolbar-group">
+        <button className="btn-icon" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={() => dispatch({ type: 'UNDO' })}>↩️</button>
+        <button className="btn-icon" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => dispatch({ type: 'REDO' })}>↪️</button>
+      </div>
 
       <div className="toolbar-group">
         <span className="group-label">Add Character</span>
@@ -57,13 +75,22 @@ export default function Toolbar({ state, dispatch, onOpenBoneEditor, onOpenExpor
       <div className="toolbar-group">
         <label className="field inline">
           Scene
-          <select value={state.settings.background} onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { background: e.target.value } })}>
+          <select
+            value={state.settings.background}
+            disabled={!!state.settings.backgroundImage}
+            onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { background: e.target.value } })}
+          >
             <option value="crypt">Crypt</option>
             <option value="fog">Foggy Woods</option>
             <option value="blood">Blood Moon</option>
             <option value="void">Void</option>
           </select>
         </label>
+        <button className="btn-ghost" onClick={() => backgroundInput.current.click()}>+ Upload Background</button>
+        {state.settings.backgroundImage && (
+          <button className="btn-ghost small" onClick={() => dispatch({ type: 'SET_BACKGROUND_IMAGE', image: null })}>✕ Clear</button>
+        )}
+        <input ref={backgroundInput} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handleBackgroundFile} />
         <button className="btn-primary export-btn" onClick={onOpenExport}>Export</button>
       </div>
     </div>
