@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { captureEntityData } from '../state/project.js';
 
 function labelFor(state, targetType, targetId) {
@@ -12,10 +12,26 @@ function labelFor(state, targetType, targetId) {
   return p ? `Prop: ${p.propType}` : 'Prop (deleted)';
 }
 
+// Picks a "nice" tick spacing (1/2/5/10/15/30/60s, then minutes) so long
+// scenes don't cram 60+ overlapping one-second labels onto the ruler.
+const NICE_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900];
+function pickTickStep(duration) {
+  const target = duration / 12;
+  return NICE_STEPS.find((step) => step >= target) ?? NICE_STEPS[NICE_STEPS.length - 1];
+}
+function formatTick(t) {
+  if (t < 60) return `${t}s`;
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  return s === 0 ? `${m}m` : `${m}m${s}s`;
+}
+
 export default function Timeline({ state, dispatch }) {
   const rulerRef = useRef(null);
   const audioRef = useRef(null);
   const audioFileInput = useRef(null);
+  const settingsRef = useRef(null);
+  const [showSettings, setShowSettings] = useState(false);
   const { duration, fps } = state.settings;
   const { playhead, playing, tracks } = state.timeline;
   const audio = state.audio;
@@ -38,6 +54,15 @@ export default function Timeline({ state, dispatch }) {
       el.currentTime = playhead;
     }
   }, [playing, playhead, audio?.src]);
+
+  useEffect(() => {
+    if (!showSettings) return undefined;
+    function onDown(e) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target)) setShowSettings(false);
+    }
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [showSettings]);
 
   function handleAudioFile(e) {
     const file = e.target.files?.[0];
@@ -88,6 +113,9 @@ export default function Timeline({ state, dispatch }) {
   }
 
   const sel = state.selection;
+  const tickStep = pickTickStep(duration);
+  const ticks = [];
+  for (let t = 0; t <= duration + 1e-6; t += tickStep) ticks.push(Math.round(t * 100) / 100);
 
   return (
     <div className="timeline">
@@ -96,23 +124,34 @@ export default function Timeline({ state, dispatch }) {
           {playing ? '⏸' : '▶'}
         </button>
         <span className="time-readout">{playhead.toFixed(2)}s / {duration}s</span>
-        <label>
-          FPS
-          <select value={fps} onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { fps: Number(e.target.value) } })}>
-            <option value={24}>24</option>
-            <option value={30}>30</option>
-          </select>
-        </label>
-        <label>
-          Duration
-          <input
-            type="number"
-            min={1}
-            max={60}
-            value={duration}
-            onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { duration: Number(e.target.value) } })}
-          />
-        </label>
+
+        <div className="scene-settings-wrap" ref={settingsRef}>
+          <button className="btn-icon" title="Scene Settings" onClick={() => setShowSettings((v) => !v)}>⚙</button>
+          {showSettings && (
+            <div className="scene-settings-popover">
+              <h4>Scene Settings</h4>
+              <label className="field">
+                FPS
+                <select value={fps} onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { fps: Number(e.target.value) } })}>
+                  <option value={24}>24</option>
+                  <option value={30}>30</option>
+                  <option value={60}>60</option>
+                </select>
+              </label>
+              <label className="field">
+                Scene Duration (seconds)
+                <input
+                  type="number"
+                  min={1}
+                  max={600}
+                  value={duration}
+                  onChange={(e) => dispatch({ type: 'SET_SETTINGS', patch: { duration: Math.max(1, Number(e.target.value) || 1) } })}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
         <button className="btn-ghost" onClick={() => addKeyframeFor('camera', null)}>◆ Key Camera</button>
         {sel && (
           <button className="btn-ghost accent" onClick={() => addKeyframeFor(sel.type, sel.id)}>
@@ -122,8 +161,8 @@ export default function Timeline({ state, dispatch }) {
       </div>
 
       <div className="timeline-ruler" ref={rulerRef} onPointerDown={handleRulerDown}>
-        {Array.from({ length: Math.floor(duration) + 1 }).map((_, i) => (
-          <div key={i} className="ruler-tick" style={{ left: `${(i / duration) * 100}%` }}>{i}s</div>
+        {ticks.map((t) => (
+          <div key={t} className="ruler-tick" style={{ left: `${(t / duration) * 100}%` }}>{formatTick(t)}</div>
         ))}
         <div className="playhead" style={{ left: `${(playhead / duration) * 100}%` }} />
       </div>

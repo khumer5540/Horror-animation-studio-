@@ -241,6 +241,72 @@ export const PROP_TYPES = {
       ctx.fillRect(-4, 10, 8, 16);
     },
   },
+  brokenWindow: {
+    label: 'Broken Window',
+    category: 'objects',
+    size: 80,
+    draw(ctx) {
+      ctx.fillStyle = 'rgba(180,205,215,0.15)';
+      ctx.fillRect(-30, -35, 60, 70);
+      ctx.strokeStyle = '#3a2418';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(-30, -35, 60, 70);
+      ctx.beginPath();
+      ctx.moveTo(0, -35);
+      ctx.lineTo(0, 35);
+      ctx.moveTo(-30, 0);
+      ctx.lineTo(30, 0);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(225,235,245,0.85)';
+      ctx.lineWidth = 1.4;
+      path(ctx, [[-5, -10], [10, 5], [2, 20], [15, 30]], false);
+      ctx.stroke();
+      path(ctx, [[10, 5], [-15, 15]], false);
+      ctx.stroke();
+      path(ctx, [[2, 20], [-10, 28]], false);
+      ctx.stroke();
+      ctx.fillStyle = '#0a0508';
+      path(ctx, [[12, -5], [24, -20], [26, -2]]);
+      ctx.fill();
+    },
+  },
+  hangingChains: {
+    label: 'Hanging Chains',
+    category: 'environment',
+    size: 70,
+    draw(ctx) {
+      ctx.strokeStyle = '#6b6b6b';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 6; i += 1) {
+        const y = -35 + i * 13;
+        ctx.beginPath();
+        ctx.ellipse(0, y, i % 2 === 0 ? 6 : 9, i % 2 === 0 ? 9 : 6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    },
+  },
+  ghostlyAura: {
+    label: 'Ghostly Aura',
+    category: 'environment',
+    size: 100,
+    draw(ctx) {
+      const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
+      grad.addColorStop(0, 'rgba(180,255,220,0.55)');
+      grad.addColorStop(0.6, 'rgba(120,220,255,0.25)');
+      grad.addColorStop(1, 'rgba(120,220,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 46, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200,255,240,0.5)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i += 1) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 18 + i * 9, 0.3 + i, 2.5 + i);
+        ctx.stroke();
+      }
+    },
+  },
 };
 
 export const PROP_CATEGORIES = ['effects', 'weapons', 'objects', 'environment'];
