@@ -45,6 +45,20 @@ export function lerpPose(a, b, t) {
   return t < 0.5 ? a : b;
 }
 
+// "Blank keyframe" visibility (Adobe Animate style): the keyframe in effect
+// at time `t` is whichever one's time is latest without exceeding `t`; if
+// that keyframe's data.visible is explicitly false, the object stays hidden
+// for that whole segment, until the next keyframe flips it back on.
+export function isVisibleAtTime(keyframes, t) {
+  if (!keyframes || keyframes.length === 0) return true;
+  let governing = keyframes[0];
+  for (const k of keyframes) {
+    if (k.time <= t + 1e-6) governing = k;
+    else break;
+  }
+  return governing.data?.visible !== false;
+}
+
 // Sample a track's keyframes at time `t`. Keyframes: [{ time, data }] sorted.
 export function sampleTrack(keyframes, t) {
   if (!keyframes || keyframes.length === 0) return null;

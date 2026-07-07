@@ -14,10 +14,13 @@ export function createInitialProject() {
     timeline: {
       playhead: 0,
       playing: false,
+      onionSkin: false,
       tracks: {}, // key `${type}:${id}` -> { targetType, targetId, keyframes: [{time,data}] }
     },
   };
 }
+
+export const DEFAULT_DEFORM = { belly: 0, stretch: 1, warp: 0 };
 
 function trackKey(targetType, targetId) {
   return `${targetType}:${targetId}`;
@@ -38,6 +41,7 @@ export function projectReducer(state, action) {
         y: action.y ?? 300,
         bones: {},
         severed: {},
+        deform: { ...DEFAULT_DEFORM },
       };
       return { ...state, characters: [...state.characters, char], selection: { type: 'character', id: char.id } };
     }
@@ -50,6 +54,7 @@ export function projectReducer(state, action) {
         y: action.y ?? 300,
         bones: {},
         severed: {},
+        deform: { ...DEFAULT_DEFORM },
       };
       return { ...state, characters: [...state.characters, char], selection: { type: 'character', id: char.id } };
     }
@@ -68,9 +73,34 @@ export function projectReducer(state, action) {
                 y: action.y ?? c.y,
                 bones: action.bones ? { ...cloneBones(c.bones), ...action.bones } : c.bones,
                 severed: action.severed ? { ...(c.severed || {}), ...action.severed } : c.severed,
+                deform: action.deform ? { ...(c.deform || DEFAULT_DEFORM), ...action.deform } : c.deform,
               }
             : c
         ),
+      };
+    }
+    case 'SET_CHARACTER_DEFORM': {
+      return {
+        ...state,
+        characters: state.characters.map((c) =>
+          c.id === action.id ? { ...c, deform: { ...(c.deform || DEFAULT_DEFORM), ...action.patch } } : c
+        ),
+      };
+    }
+    case 'APPLY_ACTION_PRESET': {
+      const key = trackKey('character', action.id);
+      const character = state.characters.find((c) => c.id === action.id);
+      if (!character) return state;
+      const existing = state.timeline.tracks[key] || { targetType: 'character', targetId: action.id, keyframes: [] };
+      let keyframes = existing.keyframes.slice();
+      action.frames.forEach((f) => {
+        keyframes = keyframes.filter((k) => Math.abs(k.time - f.time) > 0.001);
+        keyframes.push({ time: f.time, data: { x: f.x, y: f.y, bones: f.bones, severed: character.severed || {}, deform: character.deform || DEFAULT_DEFORM } });
+      });
+      keyframes.sort((a, b) => a.time - b.time);
+      return {
+        ...state,
+        timeline: { ...state.timeline, tracks: { ...state.timeline.tracks, [key]: { ...existing, keyframes } } },
       };
     }
     case 'SEVER_JOINT': {
@@ -183,6 +213,9 @@ export function projectReducer(state, action) {
     case 'SET_PLAYING': {
       return { ...state, timeline: { ...state.timeline, playing: action.playing } };
     }
+    case 'SET_ONION_SKIN': {
+      return { ...state, timeline: { ...state.timeline, onionSkin: action.enabled } };
+    }
     case 'SET_SETTINGS': {
       return { ...state, settings: { ...state.settings, ...action.patch } };
     }
@@ -217,6 +250,18 @@ export function projectReducer(state, action) {
       else tracks[key] = { ...existing, keyframes };
       return { ...state, timeline: { ...state.timeline, tracks } };
     }
+    case 'TOGGLE_KEYFRAME_VISIBILITY': {
+      const key = trackKey(action.targetType, action.targetId);
+      const existing = state.timeline.tracks[key];
+      if (!existing) return state;
+      const keyframes = existing.keyframes.map((k) =>
+        Math.abs(k.time - action.time) > 0.001 ? k : { ...k, data: { ...k.data, visible: k.data.visible === false } }
+      );
+      return {
+        ...state,
+        timeline: { ...state.timeline, tracks: { ...state.timeline.tracks, [key]: { ...existing, keyframes } } },
+      };
+    }
     case 'APPLY_POSE_AT_TIME': {
       const time = action.time;
       let characters = state.characters;
@@ -228,7 +273,9 @@ export function projectReducer(state, action) {
         if (!data) continue;
         if (track.targetType === 'character') {
           characters = characters.map((c) =>
-            c.id === track.targetId ? { ...c, x: data.x, y: data.y, bones: { ...data.bones }, severed: { ...(data.severed || {}) } } : c
+            c.id === track.targetId
+              ? { ...c, x: data.x, y: data.y, bones: { ...data.bones }, severed: { ...(data.severed || {}) }, deform: { ...(data.deform || c.deform || DEFAULT_DEFORM) } }
+              : c
           );
         } else if (track.targetType === 'prop') {
           props = props.map((p) => (p.id === track.targetId ? { ...p, x: data.x, y: data.y, rotation: data.rotation, scale: data.scale } : p));
@@ -247,7 +294,7 @@ export function captureEntityData(state, targetType, targetId) {
   if (targetType === 'character') {
     const c = state.characters.find((ch) => ch.id === targetId);
     if (!c) return null;
-    return { x: c.x, y: c.y, bones: { ...c.bones }, severed: { ...(c.severed || {}) } };
+    return { x: c.x, y: c.y, bones: { ...c.bones }, severed: { ...(c.severed || {}) }, deform: { ...(c.deform || DEFAULT_DEFORM) } };
   }
   if (targetType === 'prop') {
     const p = state.props.find((pr) => pr.id === targetId);

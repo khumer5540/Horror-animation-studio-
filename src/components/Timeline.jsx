@@ -113,6 +113,8 @@ export default function Timeline({ state, dispatch }) {
   }
 
   const sel = state.selection;
+  const cameraTrack = tracks['camera:null'];
+  const entityTracks = Object.entries(tracks).filter(([key]) => key !== 'camera:null');
   const tickStep = pickTickStep(duration);
   const ticks = [];
   for (let t = 0; t <= duration + 1e-6; t += tickStep) ticks.push(Math.round(t * 100) / 100);
@@ -158,6 +160,13 @@ export default function Timeline({ state, dispatch }) {
             ◆ Key Selected
           </button>
         )}
+        <button
+          className={`btn-icon ${state.timeline.onionSkin ? 'active' : ''}`}
+          title="Onion Skin: ghost the previous/next frame at 30% opacity"
+          onClick={() => dispatch({ type: 'SET_ONION_SKIN', enabled: !state.timeline.onionSkin })}
+        >
+          🧅
+        </button>
       </div>
 
       <div className="timeline-ruler" ref={rulerRef} onPointerDown={handleRulerDown}>
@@ -184,17 +193,33 @@ export default function Timeline({ state, dispatch }) {
         <input ref={audioFileInput} type="file" accept="audio/mpeg,audio/wav,audio/*" style={{ display: 'none' }} onChange={handleAudioFile} />
         <audio ref={audioRef} style={{ display: 'none' }} />
 
-        {Object.entries(tracks).length === 0 && <p className="hint">No keyframes yet. Pose a character or prop, then click "Key Selected" (or "Key Camera").</p>}
-        {Object.entries(tracks).map(([key, track]) => (
+        <div className="track-row camera-track-row">
+          <div className="track-label">🎥 Camera</div>
+          <div className="track-lane">
+            {(cameraTrack?.keyframes || []).map((kf) => (
+              <div
+                key={kf.time}
+                className="keyframe-diamond"
+                style={{ left: `${(kf.time / duration) * 100}%` }}
+                title={`t=${kf.time}s (double-click to delete)`}
+                onDoubleClick={() => dispatch({ type: 'DELETE_KEYFRAME', targetType: 'camera', targetId: null, time: kf.time })}
+              />
+            ))}
+          </div>
+        </div>
+
+        {entityTracks.length === 0 && <p className="hint">No character/prop keyframes yet. Pose something, then click "Key Selected". Pan/zoom and click "Key Camera" for a V-Cam move.</p>}
+        {entityTracks.map(([key, track]) => (
           <div className="track-row" key={key}>
             <div className="track-label">{labelFor(state, track.targetType, track.targetId)}</div>
             <div className="track-lane">
               {track.keyframes.map((kf) => (
                 <div
                   key={kf.time}
-                  className="keyframe-diamond"
+                  className={`keyframe-diamond ${kf.data.visible === false ? 'hidden-key' : ''}`}
                   style={{ left: `${(kf.time / duration) * 100}%` }}
-                  title={`t=${kf.time}s (double-click to delete)`}
+                  title={`t=${kf.time}s — click to toggle visibility, double-click to delete`}
+                  onClick={() => dispatch({ type: 'TOGGLE_KEYFRAME_VISIBILITY', targetType: track.targetType, targetId: track.targetId, time: kf.time })}
                   onDoubleClick={() => dispatch({ type: 'DELETE_KEYFRAME', targetType: track.targetType, targetId: track.targetId, time: kf.time })}
                 />
               ))}

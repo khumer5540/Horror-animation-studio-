@@ -11,6 +11,8 @@ import {
 import { solveLocalAngleForTarget } from '../engine/skeleton.js';
 import { DRAGGABLE_JOINTS, HUMANOID_BONES } from '../data/rigTypes.js';
 import { PROP_TYPES } from '../data/props.js';
+import { sampleTrack, isVisibleAtTime } from '../engine/tween.js';
+import { DEFAULT_DEFORM } from '../state/project.js';
 
 const HIT_PX = 22; // generous enough for a fingertip, not just a mouse cursor
 const BG_THEMES = {
@@ -39,6 +41,35 @@ function drawImageCover(ctx, img, dw, dh) {
     sy = (ih - sh) / 2;
   }
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+}
+
+// Parametric "shape tween" stand-in for the belly-size slider: a soft radial
+// blob between hips and chest that grows with the slider, rather than a full
+// mesh-vertex remap (which the rigid cutout renderer intentionally forbids —
+// see engine/meshWarp.js — to avoid reintroducing rubber-band stretching).
+function drawBellyBulge(ctx, world, belly) {
+  const hips = world.get('hips');
+  const chest = world.get('chest');
+  if (!hips || belly <= 0) return;
+  const cx = chest ? (hips.x + chest.x) / 2 : hips.x;
+  const cy = chest ? (hips.y + chest.y) / 2 : hips.y - 20;
+  const r = 14 + belly * 34;
+  const grad = ctx.createRadialGradient(cx, cy, r * 0.15, cx, cy, r);
+  grad.addColorStop(0, 'rgba(150,125,95,0.6)');
+  grad.addColorStop(1, 'rgba(150,125,95,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Applies the Deform tab's Height/Stretch and Warp sliders as a rigid ctx
+// transform anchored at the character's root joint, wrapping its normal draw.
+function applyDeformTransform(ctx, rootP, deform) {
+  ctx.translate(rootP.x, rootP.y);
+  if (deform.stretch && deform.stretch !== 1) ctx.scale(1, deform.stretch);
+  if (deform.warp) ctx.transform(1, 0, deform.warp * 0.6, 1, 0, 0);
+  ctx.translate(-rootP.x, -rootP.y);
 }
 
 function drawLightingOverlays(ctx, lighting, w, h) {
@@ -137,11 +168,45 @@ export default function Stage({ state, dispatch }) {
     const worldMap = new Map();
     state.characters.forEach((c) => worldMap.set(c.id, computeCharacterWorld(c, state.customRigs)));
 
+    // Onion skinning: ghost the previous/next frame at 30% opacity, sampled
+    // straight from each character's timeline track (read-only — this never
+    // dispatches, so it can't disturb real playhead state).
+    if (state.timeline.onionSkin) {
+      const dt = 1 / state.settings.fps;
+      const playhead = state.timeline.playhead;
+      [playhead - dt, playhead + dt].forEach((raw) => {
+        const time = Math.max(0, Math.min(state.settings.duration, raw));
+        if (Math.abs(time - playhead) < 1e-4) return;
+        state.characters.forEach((c) => {
+          const track = state.timeline.tracks[`character:${c.id}`];
+          if (!track || !isVisibleAtTime(track.keyframes, time)) return;
+          const data = sampleTrack(track.keyframes, time);
+          if (!data) return;
+          const ghost = { ...c, x: data.x, y: data.y, bones: data.bones, severed: data.severed || {} };
+          const ghostWorld = computeCharacterWorld(ghost, state.customRigs);
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          if (ghost.kind === 'custom') drawCustomCharacter(ctx, ghost, ghostWorld, state.customRigs);
+          else drawBuiltInCharacter(ctx, ghost, ghostWorld, false);
+          ctx.restore();
+        });
+      });
+    }
+
     state.characters.forEach((c) => {
+      const track = state.timeline.tracks[`character:${c.id}`];
+      if (track && !isVisibleAtTime(track.keyframes, state.timeline.playhead)) return;
       const world = worldMap.get(c.id);
       const selected = state.selection?.type === 'character' && state.selection.id === c.id;
+      const deform = c.deform || DEFAULT_DEFORM;
+      const rootId = getRootJointId(c, state.customRigs);
+      const rootP = world.get(rootId) || { x: c.x, y: c.y };
+
+      ctx.save();
+      applyDeformTransform(ctx, rootP, deform);
       if (c.kind === 'custom') drawCustomCharacter(ctx, c, world, state.customRigs);
       else drawBuiltInCharacter(ctx, c, world, selected);
+      if (deform.belly > 0) drawBellyBulge(ctx, world, deform.belly);
 
       if (selected) {
         if (c.kind === 'custom') {
@@ -161,9 +226,12 @@ export default function Stage({ state, dispatch }) {
           });
         }
       }
+      ctx.restore();
     });
 
     state.props.forEach((p) => {
+      const propTrack = state.timeline.tracks[`prop:${p.id}`];
+      if (propTrack && !isVisibleAtTime(propTrack.keyframes, state.timeline.playhead)) return;
       const t = propWorldTransform(p, worldMap);
       ctx.save();
       ctx.translate(t.x, t.y);
